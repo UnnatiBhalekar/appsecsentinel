@@ -1,0 +1,36 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DangerousAdminAccess",
+      "Effect": "Allow",
+      "Action": "*",
+      "Resource": "*"
+    },
+    {
+      "Sid": "OverlyBroadS3",
+      "Effect": "Allow",
+      "Action": "s3:*",
+      "Resource": "*"
+    },
+    {
+      "Sid": "PrivilegeEscalationRisk",
+      "Effect": "Allow",
+      "Action": [
+        "iam:PassRole",
+        "lambda:CreateFunction",
+        "lambda:InvokeFunction"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "MissingMFACondition",
+      "Effect": "Allow",
+      "Action": [
+        "sts:AssumeRole",
+        "iam:CreateAccessKey"
+      ],
+      "Resource": "arn:aws:iam::123456789012:role/AdminRole"
+    }
+  ]
+}
