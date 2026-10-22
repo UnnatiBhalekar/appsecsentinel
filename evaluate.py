@@ -2,50 +2,43 @@
 evaluate.py
 -----------
 Runs every case in tests/test_scanner.py through scan_owasp_vulnerabilities()
-and prints a full accuracy report:
+and prints a full accuracy report.
 
-  - True Positives  (TP): scanner flagged a genuinely vulnerable snippet
-  - False Positives (FP): scanner flagged a safe snippet (over-detection)
-  - False Negatives (FN): scanner missed a vulnerable snippet (under-detection)
-  - True Negatives  (TN): scanner correctly cleared a safe snippet
+Groups:
+  EASY  — original 39 cases (CASES list)
+  HARD  — 15 harder cases (HARD_CASES list)
 
-  Precision = TP / (TP + FP)  — "of everything flagged, how much is real?"
-  Recall    = TP / (TP + FN)  — "of everything real, how much was caught?"
+Metrics per group and combined:
+  TP = vulnerable snippet correctly flagged
+  FP = safe snippet wrongly flagged (over-detection)
+  FN = vulnerable snippet missed (under-detection)
+  TN = safe snippet correctly cleared
+
+  Precision = TP / (TP + FP)
+  Recall    = TP / (TP + FN)
 """
 
 import sys
 import os
 
-# Allow importing from the project root without installing as a package
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from server import scan_owasp_vulnerabilities
-from tests.test_scanner import CASES
+from tests.test_scanner import CASES, HARD_CASES
 
-# ---------------------------------------------------------------------------
-# Helper: decide if a result counts as "flagged"
-# The scanner returns the clean message when nothing is found,
-# so anything NOT starting with the clean prefix is a finding.
-# ---------------------------------------------------------------------------
 CLEAN_PREFIX = "✅ No OWASP Top 10"
 
+
 def was_flagged(result: str) -> bool:
-    """Return True if the scanner reported at least one finding."""
     return not result.strip().startswith(CLEAN_PREFIX)
 
 
-def run_evaluation():
-    tp = []  # (name) — correctly flagged
-    fp = []  # (name) — wrongly flagged (safe code)
-    fn = []  # (name) — missed (vulnerable code)
-    tn = []  # (name) — correctly cleared
+def evaluate_group(cases, group_name: str) -> dict:
+    """Run all cases in `cases` and return accuracy stats."""
+    tp, fp, fn, tn = [], [], [], []
+    wrong = []
 
-    wrong = []  # (name, expected, got, result_snippet) for the detailed wrong list
-
-    print("Running evaluation…")
-    print(f"Total cases: {len(CASES)}\n")
-
-    for name, code, language, should_flag in CASES:
+    for name, code, language, should_flag in cases:
         result = scan_owasp_vulnerabilities(code, language)
         flagged = was_flagged(result)
 
@@ -57,50 +50,64 @@ def run_evaluation():
         elif not should_flag and flagged:
             fp.append(name)
             wrong.append((name, "CLEAN", "FLAGGED", result))
-        else:  # not should_flag and not flagged
+        else:
             tn.append(name)
 
-    # ── Summary numbers ────────────────────────────────────────────────────
-    total     = len(CASES)
-    n_tp      = len(tp)
-    n_fp      = len(fp)
-    n_fn      = len(fn)
-    n_tn      = len(tn)
-
+    n_tp, n_fp, n_fn, n_tn = len(tp), len(fp), len(fn), len(tn)
     precision = n_tp / (n_tp + n_fp) if (n_tp + n_fp) > 0 else 0.0
     recall    = n_tp / (n_tp + n_fn) if (n_tp + n_fn) > 0 else 0.0
 
-    print("=" * 60)
-    print("SCANNER ACCURACY REPORT — AppSecSentinel v1 baseline")
-    print("=" * 60)
-    print(f"Total test cases  : {total}")
-    print(f"True  Positives   : {n_tp}  (vulnerable snippets correctly flagged)")
-    print(f"False Positives   : {n_fp}  (safe snippets wrongly flagged)")
-    print(f"False Negatives   : {n_fn}  (vulnerable snippets missed)")
-    print(f"True  Negatives   : {n_tn}  (safe snippets correctly cleared)")
-    print(f"Precision         : {precision:.1%}  (TP / (TP + FP))")
-    print(f"Recall            : {recall:.1%}  (TP / (TP + FN))")
-    print()
+    print(f"\n{'─' * 60}")
+    print(f"GROUP: {group_name}  ({len(cases)} cases)")
+    print(f"{'─' * 60}")
+    print(f"  True  Positives : {n_tp}")
+    print(f"  False Positives : {n_fp}")
+    print(f"  False Negatives : {n_fn}")
+    print(f"  True  Negatives : {n_tn}")
+    print(f"  Precision       : {precision:.1%}")
+    print(f"  Recall          : {recall:.1%}")
 
-    # ── Wrong results detail ───────────────────────────────────────────────
     if wrong:
-        print(f"WRONG RESULTS ({len(wrong)}):")
-        print("-" * 60)
+        print(f"\n  Wrong ({len(wrong)}):")
         for name, expected, got, snippet in wrong:
-            # Trim the result to the first 120 chars so the output is readable
-            short = snippet.strip()[:120].replace("\n", " | ")
-            print(f"  [{got}]  {name}")
-            print(f"    Expected : {expected}")
-            print(f"    Scanner  : {short}…")
-            print()
-    else:
-        print("All cases correct — no wrong results.")
+            short = snippet.strip()[:100].replace("\n", " | ")
+            print(f"    [{got}] {name}")
+            print(f"      expected={expected}  scanner={short}…")
 
-    # Return data for the markdown writer
-    return {
-        "total": total, "tp": tp, "fp": fp, "fn": fn, "tn": tn,
-        "precision": precision, "recall": recall, "wrong": wrong,
-    }
+    return {"total": len(cases), "tp": n_tp, "fp": n_fp, "fn": n_fn, "tn": n_tn,
+            "precision": precision, "recall": recall, "wrong": wrong}
+
+
+def run_evaluation():
+    print("=" * 60)
+    print("SCANNER ACCURACY REPORT — AppSecSentinel")
+    print("=" * 60)
+
+    easy = evaluate_group(CASES,      "EASY (original 39)")
+    hard = evaluate_group(HARD_CASES, "HARD (new 15)")
+
+    # Combined totals
+    tp = easy["tp"] + hard["tp"]
+    fp = easy["fp"] + hard["fp"]
+    fn = easy["fn"] + hard["fn"]
+    tn = easy["tn"] + hard["tn"]
+    total = easy["total"] + hard["total"]
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall    = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+
+    print(f"\n{'═' * 60}")
+    print(f"COMBINED  ({total} cases)")
+    print(f"{'═' * 60}")
+    print(f"  True  Positives : {tp}")
+    print(f"  False Positives : {fp}")
+    print(f"  False Negatives : {fn}")
+    print(f"  True  Negatives : {tn}")
+    print(f"  Precision       : {precision:.1%}")
+    print(f"  Recall          : {recall:.1%}")
+
+    return {"easy": easy, "hard": hard,
+            "combined": {"tp": tp, "fp": fp, "fn": fn, "tn": tn,
+                         "precision": precision, "recall": recall}}
 
 
 if __name__ == "__main__":

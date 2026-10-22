@@ -38,6 +38,7 @@ import datetime
 import pathlib
 
 from mcp.server.fastmcp import FastMCP
+from core.python_ast_scanner import scan_python
 
 # ---------------------------------------------------------------------------
 # Resolve project directory from __file__ so the audit log always writes
@@ -173,11 +174,13 @@ OWASP_PATTERNS: list[tuple[str, str, str, re.Pattern]] = [
          r"(?i)(os\.system\s*\(|subprocess\.(call|run|Popen)\s*\(.*shell\s*=\s*True"
          r"|Runtime\.getRuntime\(\)\.exec)",
      )),
-    # A03 — XSS
-    ("A03 Injection / A07 XSS", "HIGH",
+    # A03 — XSS (label corrected: XSS is A03, not A07)
+    ("A03 Injection", "HIGH",
      "Cross-Site Scripting sink (innerHTML / document.write / eval)",
      re.compile(
-         r"(?i)(innerHTML\s*=|document\.write\s*\(|eval\s*\(|setTimeout\s*\(\s*['\"])",
+         # Negative lookahead on innerHTML= skips DOMPurify.sanitize(…) on the RHS
+         r"(?i)(innerHTML\s*=(?!\s*DOMPurify\.sanitize\s*\()"
+         r"|document\.write\s*\(|eval\s*\(|setTimeout\s*\(\s*['\"])",
      )),
     # A02 — Cryptographic Failures
     ("A02 Cryptographic Failures", "HIGH",
@@ -191,7 +194,9 @@ OWASP_PATTERNS: list[tuple[str, str, str, re.Pattern]] = [
     ("A08 Insecure Deserialisation", "CRITICAL",
      "Unsafe deserialisation (pickle.loads / yaml.load / ObjectInputStream)",
      re.compile(
-         r"(?i)(pickle\.loads?\s*\(|yaml\.load\s*\([^)]*\)(?!\s*,\s*Loader)"
+         # yaml pattern fixed: match only single-arg form yaml.load(expr)
+         # [^,)] stops at the first comma so yaml.load(x, Loader=...) is skipped
+         r"(?i)(pickle\.loads?\s*\(|yaml\.load\s*\(\s*[^,)]+\s*\)"
          r"|new\s+ObjectInputStream\s*\()",
      )),
     # A01 — Path Traversal
@@ -212,8 +217,8 @@ OWASP_PATTERNS: list[tuple[str, str, str, re.Pattern]] = [
     ("A02 Cryptographic Failures", "CRITICAL",
      "Private key material in source",
      re.compile(r"-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----")),
-    # A09 — Insecure randomness used for security
-    ("A09 Security Logging Failures", "MEDIUM",
+    # A02 — Insecure randomness (corrected label: weak entropy is a crypto failure)
+    ("A02 Cryptographic Failures", "MEDIUM",
      "Insecure randomness for security-sensitive context (Math.random / random.random)",
      re.compile(r"(?i)(Math\.random\s*\(\)|random\.random\s*\(\))")),
 ]
@@ -248,7 +253,21 @@ def scan_owasp_vulnerabilities(code: str, language: str = "generic") -> str:
     try:
         findings: list[tuple[str, str, str, int]] = []  # (severity, category, label, count)
 
+        # --- AST scan (Python only; falls back silently if code won't parse) ---
+        # The AST scanner understands variable assignments, so it catches patterns
+        # like `sql = "..." + user_id; cursor.execute(sql)` that a regex misses.
+        ast_covered: set[str] = set()  # categories where AST produced a result
+        ast_results = scan_python(code)
+        for f in ast_results:
+            findings.append((f.severity, f.category, f.label, 1))
+            ast_covered.add(f.category)
+
+        # --- Regex scan for categories not already covered by AST ---
+        # For categories the AST handled (SQL, command injection, deserialization,
+        # weak hashing on Python), skip the regex to avoid duplicate findings.
         for category, severity, label, pattern in OWASP_PATTERNS:
+            if category in ast_covered:
+                continue  # AST already found something here; no need to double-report
             matches = pattern.findall(code)
             if matches:
                 findings.append((severity, category, label, len(matches)))

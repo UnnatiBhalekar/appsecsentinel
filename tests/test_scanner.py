@@ -229,3 +229,99 @@ CASES = [
      'token = secrets.token_hex(32)',
      "python", False),
 ]
+
+# ---------------------------------------------------------------------------
+# Hard cases: patterns that trip up a regex but an AST-based scanner should
+# handle.  Each is labelled "hard_" so evaluate.py can report them separately.
+# ---------------------------------------------------------------------------
+HARD_CASES = [
+
+    # ── SQL: query built on one line, executed on the next ─────────────────
+    # Regex needs both SQL keywords AND a concat indicator in a single pass.
+    # The variable that holds the concatenated string breaks that single pass.
+    ("hard_sql_split_lines",
+     'sql = "SELECT * FROM users WHERE id = " + user_id\ncursor.execute(sql)',
+     "python", True),
+
+    # ── SQL: multi-line f-strings (implicit string concatenation) ──────────
+    # Each subsequent f"..." token starts with f" which the regex sees after
+    # the SQL keywords — this one the regex DOES catch via the f[\"'] indicator.
+    ("hard_sql_multiline_fstrings",
+     'query = (\n    f"SELECT u.name, u.email "\n    f"FROM users u "\n    f"WHERE u.id = {user_id}"\n)',
+     "python", True),
+
+    # ── SQL: taint carried through an intermediate variable ────────────────
+    # condition is built with user input, then spliced into query.
+    # Regex only sees the second line's WHERE...+ which has no quote after +.
+    ("hard_sql_chain_variable",
+     'condition = "id = \'" + user_id + "\'"\nquery = "SELECT * FROM users WHERE " + condition\ncursor.execute(query)',
+     "python", True),
+
+    # ── SQL: .format() called directly inside cursor.execute ───────────────
+    # The format( indicator appears after the SQL keywords — regex catches this.
+    ("hard_sql_format_execute",
+     'cursor.execute("SELECT * FROM users WHERE name = \'{}\'".format(name))',
+     "python", True),
+
+    # ── SQL: % format operator directly inside cursor.execute ──────────────
+    # %s appears after WHERE — regex catches this too.
+    ("hard_sql_percent_execute",
+     'cursor.execute("SELECT * FROM users WHERE id = \'%s\'" % user_id)',
+     "python", True),
+
+    # ── Command: subprocess across multiple lines, shell=True ──────────────
+    # Regex has no DOTALL so it can't match subprocess.run( on line 1 with
+    # shell=True on line 3. AST parses it as one Call node and sees both.
+    ("hard_cmd_multiline_shell_variable",
+     'cmd = "rm -rf " + path\nresult = subprocess.run(\n    cmd,\n    shell=True,\n    capture_output=True\n)',
+     "python", True),
+
+    # ── Deserialisation: yaml.load with no Loader at all ───────────────────
+    ("hard_yaml_no_loader",
+     'data = yaml.load(stream)',
+     "python", True),
+
+    # ── SAFE: yaml.load WITH explicit SafeLoader ───────────────────────────
+    # The current regex negative-lookahead is misplaced (checks after ")" not
+    # inside it) so this is a known FALSE POSITIVE before the fix.
+    ("hard_yaml_safeloader",
+     'config = yaml.load(config_file, Loader=yaml.SafeLoader)',
+     "python", False),
+
+    # ── SAFE: yaml.safe_load — the recommended API ────────────────────────
+    ("hard_yaml_safe_load",
+     'config = yaml.safe_load(config_file.read())',
+     "python", False),
+
+    # ── SAFE: multi-line parameterised query (named params) ───────────────
+    ("hard_sql_multiline_parameterised",
+     'cursor.execute(\n    "SELECT name, email FROM users WHERE id = :user_id",\n    {"user_id": user_id}\n)',
+     "python", False),
+
+    # ── SAFE: ORM filter — no raw SQL at all ──────────────────────────────
+    ("hard_sql_orm",
+     'users = User.objects.filter(id=user_id, active=True)',
+     "python", False),
+
+    # ── SAFE: subprocess with a list and no shell=True ────────────────────
+    ("hard_cmd_list_no_shell",
+     'args = ["rm", "-rf", temp_dir]\nsubprocess.run(args, check=True)',
+     "python", False),
+
+    # ── SAFE: innerHTML = DOMPurify.sanitize(...) ─────────────────────────
+    # The XSS regex matches innerHTML = unconditionally — this is a known
+    # FALSE POSITIVE before the fix (sanitised RHS makes it safe).
+    ("hard_xss_dompur",
+     'element.innerHTML = DOMPurify.sanitize(userInput);',
+     "javascript", False),
+
+    # ── SAFE: named-params execute — no taint ─────────────────────────────
+    ("hard_sql_named_params",
+     'cursor.execute("SELECT * FROM users WHERE id = :id AND active = :active",\n               {"id": user_id, "active": True})',
+     "python", False),
+
+    # ── SAFE: sha256 helper function ──────────────────────────────────────
+    ("hard_hash_sha256",
+     'def hash_password(pw: str) -> str:\n    salt = os.urandom(16)\n    return hashlib.sha256(salt + pw.encode()).hexdigest()',
+     "python", False),
+]
