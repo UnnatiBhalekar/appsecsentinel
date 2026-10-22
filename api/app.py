@@ -24,7 +24,8 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 
 # ---------------------------------------------------------------------------
@@ -33,6 +34,8 @@ from pydantic import BaseModel, field_validator
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+_UI_DIR = Path(__file__).parent.parent / "ui"
 
 from core.scanner      import scan_code, format_findings
 from core.jwt_inspector import inspect_jwt, format_jwt_report, JWTError
@@ -64,6 +67,15 @@ app = FastAPI(
     # Disable default /docs and /redoc in production would go here;
     # keeping them enabled for development convenience.
 )
+
+# Serve the UI at / (static files must be mounted before routes)
+if _UI_DIR.exists():
+    app.mount("/ui", StaticFiles(directory=str(_UI_DIR)), name="ui")
+
+    @app.get("/", include_in_schema=False)
+    async def serve_ui():
+        return FileResponse(str(_UI_DIR / "index.html"))
+
 
 # CORS — only the configured origin may call this API from a browser
 app.add_middleware(
