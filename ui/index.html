@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AppSecSentinel</title>
+  <style>
+    /* ── Reset & base ───────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────────── */
+    header {
+      background: #1a1d27;
+      border-bottom: 1px solid #2d3148;
+      padding: 1rem 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    header h1 { font-size: 1.2rem; font-weight: 700; color: #a78bfa; }
+    header span { font-size: 0.85rem; color: #64748b; }
+
+    /* ── Warning banner ─────────────────────────────────────────────── */
+    .warning-banner {
+      background: #2d1b00;
+      border: 1px solid #92400e;
+      border-radius: 6px;
+      color: #fbbf24;
+      font-size: 0.85rem;
+      padding: 0.6rem 1rem;
+      margin: 1rem 1.5rem 0;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    /* ── Layout ─────────────────────────────────────────────────────── */
+    main { padding: 1rem 1.5rem; max-width: 960px; margin: 0 auto; }
+
+    /* ── Tabs ───────────────────────────────────────────────────────── */
+    .tabs {
+      display: flex;
+      gap: 0.25rem;
+      margin: 1rem 0 0;
+      border-bottom: 1px solid #2d3148;
+    }
+    .tab-btn {
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: #94a3b8;
+      cursor: pointer;
+      font-size: 0.9rem;
+      padding: 0.5rem 1rem;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .tab-btn:hover { color: #e2e8f0; }
+    .tab-btn.active { color: #a78bfa; border-bottom-color: #a78bfa; font-weight: 600; }
+
+    /* ── Panel ──────────────────────────────────────────────────────── */
+    .tab-panel { display: none; padding-top: 1.25rem; }
+    .tab-panel.active { display: block; }
+
+    label { display: block; font-size: 0.85rem; color: #94a3b8; margin-bottom: 0.4rem; }
+
+    /* language selector */
+    .lang-row { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem; }
+    select {
+      background: #1a1d27;
+      border: 1px solid #2d3148;
+      border-radius: 6px;
+      color: #e2e8f0;
+      font-size: 0.85rem;
+      padding: 0.3rem 0.6rem;
+    }
+
+    textarea {
+      background: #1a1d27;
+      border: 1px solid #2d3148;
+      border-radius: 8px;
+      color: #e2e8f0;
+      font-family: "JetBrains Mono", "Fira Code", monospace;
+      font-size: 0.82rem;
+      line-height: 1.5;
+      padding: 0.75rem 1rem;
+      resize: vertical;
+      width: 100%;
+      min-height: 180px;
+    }
+    textarea:focus { border-color: #a78bfa; outline: none; }
+
+    /* ── Button row ─────────────────────────────────────────────────── */
+    .btn-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: 0.75rem;
+    }
+    button.btn {
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      padding: 0.45rem 1rem;
+      transition: opacity 0.15s;
+    }
+    button.btn:hover { opacity: 0.85; }
+    button.btn:disabled { opacity: 0.5; cursor: default; }
+    .btn-scan    { background: #7c3aed; color: #fff; font-weight: 600; }
+    .btn-example { background: #1e293b; color: #94a3b8; border: 1px solid #2d3148; }
+    .btn-clear   { background: #1e293b; color: #94a3b8; border: 1px solid #2d3148; }
+
+    /* ── Results ────────────────────────────────────────────────────── */
+    .results { margin-top: 1.25rem; }
+    .results-header {
+      font-size: 0.8rem;
+      color: #64748b;
+      margin-bottom: 0.5rem;
+    }
+
+    .finding-card {
+      background: #1a1d27;
+      border: 1px solid #2d3148;
+      border-left: 3px solid #2d3148;
+      border-radius: 6px;
+      margin-bottom: 0.5rem;
+      padding: 0.75rem 1rem;
+    }
+    .finding-card.sev-CRITICAL { border-left-color: #ef4444; }
+    .finding-card.sev-HIGH     { border-left-color: #f97316; }
+    .finding-card.sev-MEDIUM   { border-left-color: #eab308; }
+    .finding-card.sev-LOW      { border-left-color: #22d3ee; }
+
+    .finding-top { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+    .badge {
+      border-radius: 4px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 0.15rem 0.45rem;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .badge-CRITICAL { background: #450a0a; color: #fca5a5; }
+    .badge-HIGH     { background: #431407; color: #fed7aa; }
+    .badge-MEDIUM   { background: #422006; color: #fde68a; }
+    .badge-LOW      { background: #083344; color: #a5f3fc; }
+
+    .rule-id  { color: #64748b; font-size: 0.78rem; font-family: monospace; }
+    .category { color: #64748b; font-size: 0.78rem; }
+    .msg      { color: #e2e8f0; font-size: 0.85rem; margin-top: 0.35rem; }
+    .line-no  { color: #64748b; font-size: 0.75rem; margin-top: 0.2rem; }
+
+    .clean-msg {
+      color: #4ade80;
+      font-size: 0.9rem;
+      padding: 0.75rem 0;
+    }
+    .error-msg {
+      color: #f87171;
+      font-size: 0.85rem;
+      padding: 0.5rem 0;
+    }
+    .spinner { color: #64748b; font-size: 0.85rem; padding: 0.5rem 0; }
+
+    /* ── Phone adjustments ──────────────────────────────────────────── */
+    @media (max-width: 480px) {
+      header { padding: 0.75rem 1rem; }
+      main { padding: 0.75rem 1rem; }
+      .warning-banner { margin: 0.75rem 1rem 0; }
+      .tabs { gap: 0; }
+      .tab-btn { font-size: 0.82rem; padding: 0.45rem 0.65rem; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🛡️ AppSecSentinel</h1>
+  <span>OWASP Top 10 scanner</span>
+</header>
+
+<div class="warning-banner">
+  ⚠️ <strong>Do not paste real secrets, tokens or credentials.</strong>
+  Use dummy or synthetic examples only.
+</div>
+
+<main>
+  <nav class="tabs" role="tablist">
+    <button class="tab-btn active" role="tab" data-tab="code">Code</button>
+    <button class="tab-btn"        role="tab" data-tab="jwt">JWT</button>
+    <button class="tab-btn"        role="tab" data-tab="iam">IAM Policy</button>
+  </nav>
+
+  <!-- ── CODE TAB ──────────────────────────────────────────────────── -->
+  <section id="tab-code" class="tab-panel active" role="tabpanel">
+    <div class="lang-row">
+      <label for="lang-select" style="margin:0">Language:</label>
+      <select id="lang-select">
+        <option value="python">Python</option>
+        <option value="java">Java</option>
+        <option value="javascript">JavaScript</option>
+        <option value="generic">Generic</option>
+      </select>
+    </div>
+    <textarea id="code-input" placeholder="Paste source code here…" rows="10"></textarea>
+    <div class="btn-row">
+      <button class="btn btn-scan"    id="code-scan-btn">Scan</button>
+      <button class="btn btn-example" id="code-example-btn">Load example</button>
+      <button class="btn btn-clear"   id="code-clear-btn">Clear</button>
+    </div>
+    <div class="results" id="code-results"></div>
+  </section>
+
+  <!-- ── JWT TAB ───────────────────────────────────────────────────── -->
+  <section id="tab-jwt" class="tab-panel" role="tabpanel">
+    <label for="jwt-input">JWT token</label>
+    <textarea id="jwt-input" placeholder="Paste a JWT (header.payload.signature) here…" rows="5"></textarea>
+    <div class="btn-row">
+      <button class="btn btn-scan"    id="jwt-scan-btn">Inspect</button>
+      <button class="btn btn-example" id="jwt-example-btn">Load example</button>
+      <button class="btn btn-clear"   id="jwt-clear-btn">Clear</button>
+    </div>
+    <div class="results" id="jwt-results"></div>
+  </section>
+
+  <!-- ── IAM TAB ───────────────────────────────────────────────────── -->
+  <section id="tab-iam" class="tab-panel" role="tabpanel">
+    <label for="iam-input">IAM policy JSON</label>
+    <textarea id="iam-input" placeholder='{"Version":"2012-10-17","Statement":[…]}' rows="10"></textarea>
+    <div class="btn-row">
+      <button class="btn btn-scan"    id="iam-scan-btn">Audit</button>
+      <button class="btn btn-example" id="iam-example-btn">Load example</button>
+      <button class="btn btn-clear"   id="iam-clear-btn">Clear</button>
+    </div>
+    <div class="results" id="iam-results"></div>
+  </section>
+</main>
+
+<script>
+  /* All user-supplied data is rendered with textContent, never innerHTML,
+     so a snippet containing <script> tags cannot execute in the results. */
+
+  const API = "";  // same origin; change to "http://localhost:8000" if needed
+
+  // ── Tab switching ─────────────────────────────────────────────────
+  document.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+      document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+      btn.classList.add("active");
+      document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
+    });
+  });
+
+  // ── Severity badge helper ─────────────────────────────────────────
+  function badge(sev) {
+    const el = document.createElement("span");
+    el.className = "badge badge-" + sev;
+    el.textContent = sev;   // textContent — cannot XSS
+    return el;
+  }
+
+  // ── Render a list of finding objects ─────────────────────────────
+  function renderFindings(findings, container) {
+    container.textContent = "";   // clear safely
+
+    if (!findings || findings.length === 0) {
+      const p = document.createElement("p");
+      p.className = "clean-msg";
+      p.textContent = "✅ No issues found.";
+      container.appendChild(p);
+      return;
+    }
+
+    const hdr = document.createElement("p");
+    hdr.className = "results-header";
+    hdr.textContent = findings.length + " finding(s):";
+    container.appendChild(hdr);
+
+    findings.forEach(f => {
+      const card = document.createElement("div");
+      card.className = "finding-card sev-" + f.severity;
+
+      const top = document.createElement("div");
+      top.className = "finding-top";
+      top.appendChild(badge(f.severity));
+
+      const ruleEl = document.createElement("span");
+      ruleEl.className = "rule-id";
+      ruleEl.textContent = f.rule_id;
+      top.appendChild(ruleEl);
+
+      const catEl = document.createElement("span");
+      catEl.className = "category";
+      catEl.textContent = f.owasp_category;
+      top.appendChild(catEl);
+
+      card.appendChild(top);
+
+      const msg = document.createElement("p");
+      msg.className = "msg";
+      msg.textContent = f.message;   // textContent — safe
+      card.appendChild(msg);
+
+      if (f.line_number && f.line_number > 0) {
+        const ln = document.createElement("p");
+        ln.className = "line-no";
+        ln.textContent = "Line " + f.line_number;
+        card.appendChild(ln);
+      }
+
+      container.appendChild(card);
+    });
+  }
+
+  function showError(container, msg) {
+    container.textContent = "";
+    const p = document.createElement("p");
+    p.className = "error-msg";
+    p.textContent = msg;   // textContent — safe
+    container.appendChild(p);
+  }
+
+  function showSpinner(container) {
+    container.textContent = "";
+    const p = document.createElement("p");
+    p.className = "spinner";
+    p.textContent = "Scanning…";
+    container.appendChild(p);
+  }
+
+  // ── Generic API call ──────────────────────────────────────────────
+  async function callApi(endpoint, body, resultsEl, btnEl) {
+    showSpinner(resultsEl);
+    btnEl.disabled = true;
+    try {
+      const res = await fetch(API + endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showError(resultsEl, data.error || "Request failed (" + res.status + ").");
+        return;
+      }
+      renderFindings(data.findings, resultsEl);
+    } catch (err) {
+      showError(resultsEl, "Could not reach the API. Is the server running?");
+    } finally {
+      btnEl.disabled = false;
+    }
+  }
+
+  // ── Code tab ──────────────────────────────────────────────────────
+  document.getElementById("code-scan-btn").addEventListener("click", () => {
+    const code = document.getElementById("code-input").value;
+    const lang = document.getElementById("lang-select").value;
+    callApi("/api/scan", { code, language: lang },
+            document.getElementById("code-results"),
+            document.getElementById("code-scan-btn"));
+  });
+
+  document.getElementById("code-example-btn").addEventListener("click", () => {
+    document.getElementById("lang-select").value = "python";
+    document.getElementById("code-input").value =
+`import os, pickle, hashlib
+
+def run_query(user_id):
+    sql = "SELECT * FROM users WHERE id = '" + user_id + "'"
+    cursor.execute(sql)
+
+def run_cmd(cmd):
+    os.system(cmd)
+
+def load_data(blob):
+    return pickle.loads(blob)
+
+def hash_password(pw):
+    return hashlib.md5(pw.encode()).hexdigest()
+`;
+  });
+
+  document.getElementById("code-clear-btn").addEventListener("click", () => {
+    document.getElementById("code-input").value = "";
+    document.getElementById("code-results").textContent = "";
+  });
+
+  // ── JWT tab ───────────────────────────────────────────────────────
+  document.getElementById("jwt-scan-btn").addEventListener("click", () => {
+    const token = document.getElementById("jwt-input").value;
+    callApi("/api/jwt", { token },
+            document.getElementById("jwt-results"),
+            document.getElementById("jwt-scan-btn"));
+  });
+
+  document.getElementById("jwt-example-btn").addEventListener("click", () => {
+    // A JWT with alg=none, no exp, no aud — intentionally weak for demo
+    document.getElementById("jwt-input").value =
+      "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0" +
+      ".eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiYWRtaW4iOnRydWV9" +
+      ".";
+  });
+
+  document.getElementById("jwt-clear-btn").addEventListener("click", () => {
+    document.getElementById("jwt-input").value = "";
+    document.getElementById("jwt-results").textContent = "";
+  });
+
+  // ── IAM tab ───────────────────────────────────────────────────────
+  document.getElementById("iam-scan-btn").addEventListener("click", () => {
+    const policy_json = document.getElementById("iam-input").value;
+    callApi("/api/iam", { policy_json },
+            document.getElementById("iam-results"),
+            document.getElementById("iam-scan-btn"));
+  });
+
+  document.getElementById("iam-example-btn").addEventListener("click", () => {
+    document.getElementById("iam-input").value = JSON.stringify({
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "DangerousAdmin",
+          "Effect": "Allow",
+          "Action": "*",
+          "Resource": "*"
+        }
+      ]
+    }, null, 2);
+  });
+
+  document.getElementById("iam-clear-btn").addEventListener("click", () => {
+    document.getElementById("iam-input").value = "";
+    document.getElementById("iam-results").textContent = "";
+  });
+</script>
+</body>
+</html>

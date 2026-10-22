@@ -54,10 +54,10 @@ def audit_policy(policy_json: str) -> tuple[list[Finding], dict]:
     """
     try:
         policy: dict = json.loads(policy_json)
-    except json.JSONDecodeError as exc:
+    except json.JSONDecodeError:
         raise PolicyError(
-            f"Error: Invalid JSON — could not parse the IAM policy. "
-            f"Detail: {exc.msg} at line {exc.lineno}."
+            "Error: Invalid JSON — could not parse the IAM policy. "
+            "Ensure the input is a valid JSON object."
         )
 
     statements = policy.get("Statement")

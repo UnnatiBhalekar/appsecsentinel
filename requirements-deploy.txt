@@ -1,0 +1,12 @@
+# requirements-deploy.txt
+# ------------------------
+# Runtime dependencies for the API only (Lambda / container deployments).
+# Does NOT include mcp, dev tools, or the MCP server runtime.
+#
+# Pin exact versions for reproducible Lambda packages.
+# Update with: pip-compile requirements-deploy.in
+
+fastapi==0.161.0
+mangum==0.22.0
+uvicorn==0.54.0
+pydantic==2.13.4
