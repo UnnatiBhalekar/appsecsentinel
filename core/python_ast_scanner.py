@@ -1,98 +1,81 @@
 """
-python_ast_scanner.py
----------------------
-AST-based security scanner for Python code.
+core/python_ast_scanner.py
+--------------------------
+AST-based security scanner for Python source code.
 
-Why AST instead of regex?
+Why AST and not regex?
   A regex sees a flat sequence of characters and has no memory between lines.
-  An AST is a tree that represents what the code *means* — so we can follow a
-  value from where it is created ("sql = 'SELECT...' + user_id") to where it
-  is used ("cursor.execute(sql)") without ever reading raw text.
+  The AST represents what the code *means*, so we can follow a value from
+  where it is assigned  ("sql = 'SELECT...' + user_id")
+  to where it is used   ("cursor.execute(sql)")
+  — including across multiple lines or through intermediate variables.
 
-Checks implemented:
-  - SQL injection in execute / executemany / executescript calls
-  - Command injection via subprocess (shell=True) and os.system
-  - Unsafe deserialisation via pickle.load/loads and yaml.load without Loader
-  - Weak hashing via hashlib.md5 and hashlib.sha1
+If the code cannot be parsed as Python, this module returns an empty list
+and the caller falls back to regex-based scanning.
 
-If the code cannot be parsed as Python (SyntaxError), the caller should fall
-back to regex scanning.
+Line numbers come directly from the AST node's .lineno attribute, which
+Python's parser fills in for every expression node.
 """
 
 import ast
-from typing import NamedTuple
+from .models import Finding
 
 
-class Finding(NamedTuple):
-    severity: str
-    category: str
-    label: str
-
-
-# ─── Taint helpers ────────────────────────────────────────────────────────────
+# ─── Taint analysis ───────────────────────────────────────────────────────────
 
 def _is_tainted(node: ast.expr | None, var_map: dict) -> bool:
     """
-    Return True if `node` may contain non-constant (user-supplied) data.
+    Return True if `node` may carry non-constant (user-supplied) data.
 
-    Rules:
-      Constant          → safe  (a string literal never carries user input)
-      Name              → look it up in var_map; if unknown, assume tainted
-      JoinedStr (f"..") → tainted if it contains any FormattedValue ({expr})
-      BinOp +           → tainted if either side is tainted
-      BinOp % (str fmt) → tainted when the left side is a string constant (%s)
-      Call .format()    → always tainted (we assume arguments are user-supplied)
-      anything else     → not tainted by default (conservative: avoid FPs)
+    Constant       → never tainted (a string literal cannot be injected)
+    Name           → look it up in var_map; if unknown, assume tainted
+    JoinedStr      → tainted when any {} slot is a non-constant FormattedValue
+    BinOp +        → tainted if either side is tainted (string concatenation)
+    BinOp % str    → tainted when left side is a str constant ("...%s" % val)
+    Call .format() → always tainted (we assume arguments carry user input)
+    anything else  → not tainted by default (conservative: avoid false positives)
     """
     if node is None:
         return False
 
-    # Pure constant — a string literal can never be injection
     if isinstance(node, ast.Constant):
-        return False
+        return False  # literals can never hold injected values
 
-    # Variable reference — resolve through assignment map
     if isinstance(node, ast.Name):
         resolved = var_map.get(node.id)
         if resolved is not None:
             return _is_tainted(resolved, var_map)
-        # Unknown variable (e.g. a function parameter) — assume tainted
-        return True
+        return True  # unknown variable — function parameter or external, assume tainted
 
-    # f-string: tainted if any {} slot contains a non-constant expression
-    if isinstance(node, ast.JoinedStr):
+    if isinstance(node, ast.JoinedStr):  # f-string
         return any(isinstance(v, ast.FormattedValue) for v in node.values)
 
-    # String concatenation: tainted if either operand is tainted
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
         return _is_tainted(node.left, var_map) or _is_tainted(node.right, var_map)
 
-    # "template %s" % value — tainted when left side is a string
     if (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mod)
             and isinstance(node.left, ast.Constant)
             and isinstance(node.left.value, str)):
-        return True
+        return True  # "template %s" % value
 
-    # str.format() call — treat any call to .format() as tainted
     if (isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
             and node.func.attr == "format"):
-        return True
+        return True  # "...{}".format(x)
 
-    return False  # conservative default: don't flag unknown node types
+    return False
 
 
-# ─── Per-call checkers ────────────────────────────────────────────────────────
+# ─── Per-call detectors ───────────────────────────────────────────────────────
 
 _SQL_METHODS = {"execute", "executemany", "executescript"}
 
 
 def _check_sql(call: ast.Call, var_map: dict) -> Finding | None:
     """
-    Flag cursor.execute / executemany / executescript when the first argument
-    (the query string) is tainted — i.e. built from non-constant parts.
-    Parameterised queries like execute(sql, (user_id,)) are safe when sql itself
-    is a Constant.
+    Flag cursor.execute / executemany / executescript when the query argument
+    is tainted.  Parameterised calls like execute(sql, (x,)) are safe as long
+    as sql itself is a constant.
     """
     func = call.func
     if not (isinstance(func, ast.Attribute) and func.attr in _SQL_METHODS):
@@ -101,17 +84,19 @@ def _check_sql(call: ast.Call, var_map: dict) -> Finding | None:
         return None
     if _is_tainted(call.args[0], var_map):
         return Finding(
-            "CRITICAL",
-            "A03 Injection",
-            f"SQL Injection — tainted first argument to .{func.attr}() (AST)",
+            rule_id="SQL-002",
+            severity="CRITICAL",
+            owasp_category="A03 Injection",
+            message=f"SQL Injection — tainted query in .{func.attr}() call",
+            line_number=getattr(call, "lineno", 0),
         )
     return None
 
 
 def _check_cmd(call: ast.Call, var_map: dict) -> Finding | None:
     """
-    Flag os.system(expr) with a non-constant argument, and subprocess calls
-    that pass shell=True with a non-constant command.
+    Flag os.system with a non-constant argument, and subprocess calls that
+    use shell=True with a non-constant command string.
     """
     func = call.func
 
@@ -120,9 +105,11 @@ def _check_cmd(call: ast.Call, var_map: dict) -> Finding | None:
             and isinstance(func.value, ast.Name) and func.value.id == "os"):
         if call.args and _is_tainted(call.args[0], var_map):
             return Finding(
-                "CRITICAL",
-                "A03 Injection",
-                "Command Injection — os.system with non-constant argument (AST)",
+                rule_id="CMD-002",
+                severity="CRITICAL",
+                owasp_category="A03 Injection",
+                message="Command Injection — os.system with non-constant argument",
+                line_number=getattr(call, "lineno", 0),
             )
 
     # subprocess.call/run/Popen(cmd, shell=True) with a non-constant cmd
@@ -135,77 +122,77 @@ def _check_cmd(call: ast.Call, var_map: dict) -> Finding | None:
         )
         if shell_true and call.args and _is_tainted(call.args[0], var_map):
             return Finding(
-                "CRITICAL",
-                "A03 Injection",
-                "Command Injection — subprocess with shell=True and non-constant command (AST)",
+                rule_id="CMD-003",
+                severity="CRITICAL",
+                owasp_category="A03 Injection",
+                message="Command Injection — subprocess with shell=True and non-constant command",
+                line_number=getattr(call, "lineno", 0),
             )
 
     return None
 
 
-def _check_deser(call: ast.Call, var_map: dict) -> Finding | None:
+def _check_deser(call: ast.Call, _var_map: dict) -> Finding | None:
     """
-    Flag pickle.load/loads (always unsafe), and yaml.load called without any
-    Loader keyword argument.  When Loader= is present the caller chose a loader
-    explicitly, so we do not flag it (even if UnsafeLoader is used — that is a
-    separate concern beyond this scanner's scope).
+    Flag pickle.load/loads (no safe variant exists) and yaml.load called
+    without an explicit Loader= keyword.
     """
     func = call.func
     if not isinstance(func, ast.Attribute):
         return None
 
-    # pickle.load or pickle.loads — no safe variant exists
     if (isinstance(func.value, ast.Name) and func.value.id == "pickle"
             and func.attr in {"load", "loads"}):
         return Finding(
-            "CRITICAL",
-            "A08 Insecure Deserialisation",
-            f"Unsafe deserialisation — pickle.{func.attr}() (AST)",
+            rule_id="DESER-002",
+            severity="CRITICAL",
+            owasp_category="A08 Insecure Deserialisation",
+            message=f"Unsafe deserialisation — pickle.{func.attr}()",
+            line_number=getattr(call, "lineno", 0),
         )
 
-    # yaml.load without Loader= keyword
     if (isinstance(func.value, ast.Name) and func.value.id == "yaml"
             and func.attr == "load"):
         has_loader = any(kw.arg == "Loader" for kw in call.keywords)
         if not has_loader:
             return Finding(
-                "CRITICAL",
-                "A08 Insecure Deserialisation",
-                "Unsafe deserialisation — yaml.load without Loader argument (AST)",
+                rule_id="DESER-003",
+                severity="CRITICAL",
+                owasp_category="A08 Insecure Deserialisation",
+                message="Unsafe deserialisation — yaml.load without Loader argument",
+                line_number=getattr(call, "lineno", 0),
             )
 
     return None
 
 
 def _check_hash(call: ast.Call) -> Finding | None:
-    """
-    Flag hashlib.md5 and hashlib.sha1 — both are cryptographically broken for
-    password hashing or digital signatures.
-    """
+    """Flag hashlib.md5 and hashlib.sha1 — cryptographically broken."""
     func = call.func
     if (isinstance(func, ast.Attribute)
             and func.attr in {"md5", "sha1"}
             and isinstance(func.value, ast.Name)
             and func.value.id == "hashlib"):
         return Finding(
-            "HIGH",
-            "A02 Cryptographic Failures",
-            f"Weak hashing algorithm — hashlib.{func.attr}() (AST)",
+            rule_id="HASH-002" if func.attr == "md5" else "HASH-003",
+            severity="HIGH",
+            owasp_category="A02 Cryptographic Failures",
+            message=f"Weak hashing algorithm — hashlib.{func.attr}()",
+            line_number=getattr(call, "lineno", 0),
         )
     return None
 
 
 # ─── Variable map builder ─────────────────────────────────────────────────────
 
-def _build_var_map(scope_nodes) -> dict:
+def _build_var_map(stmts: list[ast.stmt]) -> dict:
     """
-    Walk a sequence of AST nodes and collect the last simple-name assignment
-    for each variable.  This is a flat, single-scope approximation — good
-    enough to catch variable-indirection patterns in the same function or
-    module body.
+    Walk a list of statements and record the last simple-name assignment
+    for each variable.  Flat single-scope: good enough for same-function
+    variable indirection.
     """
     var_map: dict[str, ast.expr] = {}
-    for node in ast.walk(ast.Module(body=list(scope_nodes), type_ignores=[])):
+    for node in ast.walk(ast.Module(body=list(stmts), type_ignores=[])):
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name):
@@ -217,24 +204,23 @@ def _build_var_map(scope_nodes) -> dict:
 
 def scan_python(code: str) -> list[Finding]:
     """
-    Parse `code` as Python and return a list of security findings.
-    Returns an empty list (NOT an error) if the code has a SyntaxError —
-    the caller should fall back to regex scanning in that case.
+    Parse `code` as Python and return security findings.
+    Returns [] (not an error) on SyntaxError — caller uses regex as fallback.
     """
     try:
         tree = ast.parse(code)
     except SyntaxError:
-        return []  # not Python — signal caller to use regex
+        return []
 
     findings: list[Finding] = []
-    seen_labels: set[str] = set()  # deduplicate identical labels
+    seen: set[tuple[str, int]] = set()  # (rule_id, lineno) — avoid duplicates
 
     def _add(f: Finding | None) -> None:
-        if f and f.label not in seen_labels:
+        if f and (f.rule_id, f.line_number) not in seen:
             findings.append(f)
-            seen_labels.add(f.label)
+            seen.add((f.rule_id, f.line_number))
 
-    # Scan each function/async-function with its own local variable map
+    # ── Per-function scan (local var_map for variable indirection) ──────────
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             var_map = _build_var_map(node.body)
@@ -245,13 +231,24 @@ def scan_python(code: str) -> list[Finding]:
                     _add(_check_deser(inner, var_map))
                     _add(_check_hash(inner))
 
-    # Also scan module-level statements (code not inside any function)
-    module_var_map = _build_var_map(tree.body)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            _add(_check_sql(node, module_var_map))
-            _add(_check_cmd(node, module_var_map))
-            _add(_check_deser(node, module_var_map))
-            _add(_check_hash(node))
+    # ── Module-level scan (top-level statements only, skip function bodies) ─
+    # Build module var_map from direct Assign nodes in tree.body
+    module_var_map: dict[str, ast.expr] = {}
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign):
+            for t in stmt.targets:
+                if isinstance(t, ast.Name):
+                    module_var_map[t.id] = stmt.value
+
+    # Walk each top-level statement that is not a function/class definition
+    for stmt in tree.body:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue  # already handled per-function above
+        for inner in ast.walk(stmt):
+            if isinstance(inner, ast.Call):
+                _add(_check_sql(inner, module_var_map))
+                _add(_check_cmd(inner, module_var_map))
+                _add(_check_deser(inner, module_var_map))
+                _add(_check_hash(inner))
 
     return findings
