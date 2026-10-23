@@ -1,7 +1,6 @@
 name: Demo Gate (intentional failures)
 
 # Manual trigger only — run this to demonstrate the gate failing on purpose.
-# Useful for demos, interviews, or showing stakeholders what a blocking scan looks like.
 on:
   workflow_dispatch:
 
@@ -18,17 +17,17 @@ jobs:
       security-events: write
 
     steps:
-      # actions/checkout@v4 — pinned major version.
-      # Why pin? Prevents a tag rollback or compromise from injecting
-      # different code into a CI job that processes untrusted input.
+      # actions/checkout — pinned to full commit SHA.
+      # A mutable tag (e.g. "v4") can be moved to a different commit by the
+      # maintainer or an attacker; a SHA is immutable and auditable.
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      # actions/setup-python@v5 — pinned major version.
-      # Why pin? The setup-python action runs before any sandboxing;
-      # a compromised version could exfiltrate secrets from the runner.
+      # actions/setup-python — pinned to full commit SHA.
+      # Same rationale: setup actions run with full runner access before any
+      # user code, so they are a high-value supply-chain target.
       - name: Set up Python 3.13
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.13"
 
@@ -38,9 +37,8 @@ jobs:
       - name: Install dependencies
         run: poetry install --with dev --no-interaction --quiet
 
-      # Scan only the demo/ folder. --fail-on CRITICAL means this step will
-      # exit 1 because vulnerable_example.py has three CRITICAL findings.
-      # The workflow is marked "expected to fail" — that's the whole point.
+      # Scans demo/ which contains intentionally vulnerable code.
+      # Expected to exit 1 (CRITICAL findings present) — that is the point.
       - name: Scan demo/ (expected CRITICAL findings)
         run: |
           poetry run python sentinel_cli.py scan demo/ \
@@ -49,11 +47,11 @@ jobs:
             > demo-results.sarif
         continue-on-error: true
 
-      # github/codeql-action/upload-sarif@v3 — pinned major version.
-      # Why pin? Consistent with the main workflow; upload-sarif parses
-      # scanner output so pinning guards against parser-level changes.
+      # github/codeql-action/upload-sarif — pinned to full commit SHA.
+      # Parses scanner output; pinning guards against parser-level regressions
+      # or changes introduced via a tag update.
       - name: Upload demo SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@4bfa242aa49c5f7c6770b98670d354a7dfac05f8 # v3
         if: always()
         with:
           sarif_file: demo-results.sarif

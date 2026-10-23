@@ -17,28 +17,25 @@ jobs:
     name: Tests & SARIF self-scan
     runs-on: ubuntu-latest
 
-    # This job reads source code and uploads a SARIF file to code scanning.
-    # security-events: write is required by upload-sarif; we grant it here
-    # rather than at the workflow level so the checkout/test steps stay
-    # read-only by default.
+    # security-events: write is required by upload-sarif; granted here rather
+    # than at the workflow level so the checkout/test steps stay read-only.
     permissions:
       contents: read
       security-events: write
 
     steps:
-      # actions/checkout@v4 — pinned to a major version tag.
-      # Why pin? A mutable tag like "latest" lets a compromised upstream
-      # silently swap in malicious code on your next run. Major-version tags
-      # (v4) are re-pointed by the maintainer only for non-breaking updates,
-      # giving you a stable, auditable baseline.
+      # actions/checkout — pinned to a full commit SHA so a tag rollback or
+      # a compromised release cannot silently swap in different code.
+      # Dependabot (.github/dependabot.yml) will open a PR when a newer SHA
+      # is available for this version tag.
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      # actions/setup-python@v5 — pinned major version.
-      # Why pin? Same supply-chain reason; Python setup actions have had
-      # past CVEs. Pinning means a tag rollback cannot affect your builds.
+      # actions/setup-python — same pinning rationale; setup actions run before
+      # any sandboxing and have been the target of supply-chain attacks in other
+      # ecosystems.
       - name: Set up Python 3.13
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.13"
 
@@ -48,19 +45,20 @@ jobs:
       - name: Install dependencies
         run: poetry install --with dev --no-interaction --quiet
 
-      # Run the full pytest suite, which includes:
-      #   - test_quality.py  → precision ≥ 0.95, recall ≥ 0.90
-      #   - test_api.py      → API endpoints, 413, injection rejection
-      #   - test_cli.py      → exit codes, SARIF structure
-      #   - test_guardrails.py → audit log modes
+      # Full pytest suite includes:
+      #   test_quality.py    — precision ≥ 0.95, recall ≥ 0.90
+      #   test_api.py        — endpoint contracts, 413, injection rejection
+      #   test_cli.py        — exit codes, SARIF structure, --exclude
+      #   test_guardrails.py — audit log stream/file modes
       - name: Run tests
         run: poetry run pytest tests/ -v
 
-      # Self-scan: the project scans its own source with the CLI.
-      # --fail-on CRITICAL means the step exits 1 if any CRITICAL finding
-      # is detected in the production code, blocking the merge.
-      # The scan writes SARIF regardless of whether findings exist so
-      # upload-sarif always has a file to upload.
+      # Self-scan: the project scans its own source code.
+      # python_ast_scanner.py and core/scanner.py are excluded because they
+      # contain the pattern strings the scanner looks for, which would cause
+      # false-positive hits on the tool's own source.
+      # continue-on-error lets the upload step always run even if CRITICAL
+      # findings are detected — the job still fails, but the SARIF is uploaded.
       - name: Self-scan (SARIF)
         run: |
           poetry run python sentinel_cli.py scan \
@@ -70,16 +68,13 @@ jobs:
             --format sarif \
             --fail-on CRITICAL \
             > results.sarif
-        # Continue so the upload step always runs, even when the scan fails.
         continue-on-error: true
 
-      # github/codeql-action/upload-sarif@v3 — pinned major version.
-      # Why pin? This action receives SARIF from potentially-tainted sources
-      # (scanner output). Pinning ensures the parsing code is from a known,
-      # reviewed version rather than whatever "latest" points to today.
+      # github/codeql-action/upload-sarif — pinned to a full commit SHA.
+      # This action parses SARIF produced by potentially-tainted scanner output;
+      # pinning ensures the parser is a reviewed, known version.
       - name: Upload SARIF to GitHub code scanning
-        uses: github/codeql-action/upload-sarif@v3
-        # Run even when the self-scan step failed (found CRITICALs).
+        uses: github/codeql-action/upload-sarif@4bfa242aa49c5f7c6770b98670d354a7dfac05f8 # v3
         if: always()
         with:
           sarif_file: results.sarif

@@ -1,0 +1,15 @@
+version: 2
+
+updates:
+  # Keep GitHub Actions pinned to full commit SHAs up to date.
+  # Dependabot will open a weekly PR updating each SHA and its trailing
+  # version comment whenever the action's version tag moves to a new commit.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "ci"
+    labels:
+      - dependencies
