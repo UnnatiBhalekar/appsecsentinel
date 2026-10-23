@@ -2,6 +2,8 @@
 
 **Live demo:** https://x05wq6yn5c.execute-api.us-east-1.amazonaws.com
 
+**Walkthrough:** https://sentinel-security-story.lovable.app/
+
 A static analysis tool for detecting OWASP Top 10 vulnerabilities. It runs as an MCP server (Claude integration), a REST API deployable to AWS Lambda, and a standalone CLI that produces SARIF output for CI/CD security gates.
 
 ---
