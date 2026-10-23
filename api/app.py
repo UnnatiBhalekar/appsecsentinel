@@ -165,8 +165,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # ---------------------------------------------------------------------------
 def _audit(tool: str, text: str) -> None:
     """Log tool name, input length and SHA-256 hash. Never the raw input."""
-    write_audit_log(tool, hash_input(text))
-    logger.info("tool=%s input_len=%d input_sha256=%s", tool, len(text), hash_input(text))
+    write_audit_log(tool, hash_input(text), len(text))
 
 
 def _injection_check(text: str) -> bool:
