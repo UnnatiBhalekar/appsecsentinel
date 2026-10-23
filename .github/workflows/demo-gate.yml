@@ -21,7 +21,7 @@ jobs:
       # A mutable tag (e.g. "v4") can be moved to a different commit by the
       # maintainer or an attacker; a SHA is immutable and auditable.
       - name: Checkout source
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # actions/setup-python — pinned to full commit SHA.
       # Same rationale: setup actions run with full runner access before any
