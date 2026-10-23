@@ -108,6 +108,57 @@ def test_sarif_structure(capsys):
 
 
 # ---------------------------------------------------------------------------
+# --exclude tests
+# ---------------------------------------------------------------------------
+
+def test_exclude_skips_matching_files():
+    """--exclude <fragment> must skip files whose path contains that fragment."""
+    import tempfile, os
+    # Create a temp dir with two files: one to scan, one to skip
+    with tempfile.TemporaryDirectory() as tmpdir:
+        keep_file = Path(tmpdir) / "safe.py"
+        skip_dir  = Path(tmpdir) / "demo"
+        skip_dir.mkdir()
+        skip_file = skip_dir / "vulnerable.py"
+
+        keep_file.write_text("def add(a, b):\n    return a + b\n")
+        # This would be flagged if scanned
+        skip_file.write_text("import os\nos.system(user_cmd)\n")
+
+        # Without --exclude: dangerous file is found → exit 1
+        code_without = main(["scan", tmpdir, "--fail-on", "CRITICAL"])
+        assert code_without == 1, "Expected exit 1 without --exclude"
+
+        # With --exclude demo: dangerous file is skipped → exit 0
+        code_with = main(["scan", tmpdir, "--fail-on", "CRITICAL", "--exclude", "demo"])
+        assert code_with == 0, "Expected exit 0 when demo/ is excluded"
+
+
+def test_exclude_multiple_fragments():
+    """Multiple --exclude flags must each be applied."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmpdir:
+        bad1 = Path(tmpdir) / "skip_a" ; bad1.mkdir()
+        bad2 = Path(tmpdir) / "skip_b" ; bad2.mkdir()
+        (bad1 / "vuln.py").write_text("import os\nos.system(cmd)\n")
+        (bad2 / "vuln.py").write_text("import os\nos.system(cmd2)\n")
+
+        # Excluding only one still finds the other
+        code_partial = main([
+            "scan", tmpdir, "--fail-on", "CRITICAL",
+            "--exclude", "skip_a",
+        ])
+        assert code_partial == 1, "Expected exit 1 when only one dir excluded"
+
+        # Excluding both → nothing to flag
+        code_both = main([
+            "scan", tmpdir, "--fail-on", "CRITICAL",
+            "--exclude", "skip_a", "--exclude", "skip_b",
+        ])
+        assert code_both == 0, "Expected exit 0 when both dirs excluded"
+
+
+# ---------------------------------------------------------------------------
 # Run directly for quick manual checks
 # ---------------------------------------------------------------------------
 

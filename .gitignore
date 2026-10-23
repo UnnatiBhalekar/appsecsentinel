@@ -1,10 +1,25 @@
+# Build artefacts
+build/
+dist/
+appsentinel.zip
+*.egg-info/
+
+# Python bytecode
 __pycache__/
 *.py[cod]
 *.pyo
-.pytest_cache/
-*.egg-info/
-dist/
-build/
+
+# Virtual environments
+.venv/
+venv/
+
+# Environment and secrets
 .env
+
+# Test / tool caches
+.pytest_cache/
+
+# Logs
 *.log
 *.bak
+*.sarif

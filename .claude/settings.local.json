@@ -8,7 +8,9 @@
       "Bash(git tag *)",
       "Bash(git rm *)",
       "Bash(poetry add *)",
-      "Bash(git restore *)"
+      "Bash(git restore *)",
+      "Bash(echo \"exit code: $?\")",
+      "Bash(python3 -c ' *)"
     ]
   }
 }

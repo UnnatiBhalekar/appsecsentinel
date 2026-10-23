@@ -1,0 +1,60 @@
+name: Demo Gate (intentional failures)
+
+# Manual trigger only — run this to demonstrate the gate failing on purpose.
+# Useful for demos, interviews, or showing stakeholders what a blocking scan looks like.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  demo-scan:
+    name: Scan demo/ — expected to fail
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      # actions/checkout@v4 — pinned major version.
+      # Why pin? Prevents a tag rollback or compromise from injecting
+      # different code into a CI job that processes untrusted input.
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      # actions/setup-python@v5 — pinned major version.
+      # Why pin? The setup-python action runs before any sandboxing;
+      # a compromised version could exfiltrate secrets from the runner.
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Poetry
+        run: pip install poetry --quiet
+
+      - name: Install dependencies
+        run: poetry install --with dev --no-interaction --quiet
+
+      # Scan only the demo/ folder. --fail-on CRITICAL means this step will
+      # exit 1 because vulnerable_example.py has three CRITICAL findings.
+      # The workflow is marked "expected to fail" — that's the whole point.
+      - name: Scan demo/ (expected CRITICAL findings)
+        run: |
+          poetry run python sentinel_cli.py scan demo/ \
+            --format sarif \
+            --fail-on CRITICAL \
+            > demo-results.sarif
+        continue-on-error: true
+
+      # github/codeql-action/upload-sarif@v3 — pinned major version.
+      # Why pin? Consistent with the main workflow; upload-sarif parses
+      # scanner output so pinning guards against parser-level changes.
+      - name: Upload demo SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: demo-results.sarif
+          category: appsec-sentinel-demo

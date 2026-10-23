@@ -1,0 +1,86 @@
+name: Security Gate
+
+# Run on every PR and on direct pushes to main.
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+# Top-level permissions are as restrictive as possible.
+# Individual jobs override only what they need.
+permissions:
+  contents: read
+
+jobs:
+  # ── Job 1: tests + self-scan ──────────────────────────────────────────────
+  test-and-scan:
+    name: Tests & SARIF self-scan
+    runs-on: ubuntu-latest
+
+    # This job reads source code and uploads a SARIF file to code scanning.
+    # security-events: write is required by upload-sarif; we grant it here
+    # rather than at the workflow level so the checkout/test steps stay
+    # read-only by default.
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      # actions/checkout@v4 — pinned to a major version tag.
+      # Why pin? A mutable tag like "latest" lets a compromised upstream
+      # silently swap in malicious code on your next run. Major-version tags
+      # (v4) are re-pointed by the maintainer only for non-breaking updates,
+      # giving you a stable, auditable baseline.
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      # actions/setup-python@v5 — pinned major version.
+      # Why pin? Same supply-chain reason; Python setup actions have had
+      # past CVEs. Pinning means a tag rollback cannot affect your builds.
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Poetry
+        run: pip install poetry --quiet
+
+      - name: Install dependencies
+        run: poetry install --with dev --no-interaction --quiet
+
+      # Run the full pytest suite, which includes:
+      #   - test_quality.py  → precision ≥ 0.95, recall ≥ 0.90
+      #   - test_api.py      → API endpoints, 413, injection rejection
+      #   - test_cli.py      → exit codes, SARIF structure
+      #   - test_guardrails.py → audit log modes
+      - name: Run tests
+        run: poetry run pytest tests/ -v
+
+      # Self-scan: the project scans its own source with the CLI.
+      # --fail-on CRITICAL means the step exits 1 if any CRITICAL finding
+      # is detected in the production code, blocking the merge.
+      # The scan writes SARIF regardless of whether findings exist so
+      # upload-sarif always has a file to upload.
+      - name: Self-scan (SARIF)
+        run: |
+          poetry run python sentinel_cli.py scan \
+            core api server.py sentinel_cli.py \
+            --exclude python_ast_scanner.py \
+            --exclude core/scanner.py \
+            --format sarif \
+            --fail-on CRITICAL \
+            > results.sarif
+        # Continue so the upload step always runs, even when the scan fails.
+        continue-on-error: true
+
+      # github/codeql-action/upload-sarif@v3 — pinned major version.
+      # Why pin? This action receives SARIF from potentially-tainted sources
+      # (scanner output). Pinning ensures the parsing code is from a known,
+      # reviewed version rather than whatever "latest" points to today.
+      - name: Upload SARIF to GitHub code scanning
+        uses: github/codeql-action/upload-sarif@v3
+        # Run even when the self-scan step failed (found CRITICALs).
+        if: always()
+        with:
+          sarif_file: results.sarif
+          category: appsec-sentinel

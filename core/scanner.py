@@ -61,7 +61,7 @@ OWASP_PATTERNS: list[tuple[str, str, str, str, re.Pattern]] = [
     # A02 — Insecure cipher modes
     ("CRYPTO-001", "A02 Cryptographic Failures", "HIGH",
      "Insecure cipher mode (DES / RC4 / ECB)",
-     re.compile(r"(?i)(DES\b|RC4\b|AES/ECB|Cipher\.getInstance\(['\"]AES['\"])")),
+     re.compile(r"(?i)(\bDES\b|\bRC4\b|AES/ECB|Cipher\.getInstance\(['\"]AES['\"])")),
 
     # A08 — Unsafe deserialisation
     # yaml pattern: match only single-argument form; a comma stops the match so
